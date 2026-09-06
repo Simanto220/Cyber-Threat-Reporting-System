@@ -1,0 +1,42 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "1. Create Python venv",
+            "type": "shell",
+            "command": "python -m venv venv",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "2. Install Requirements",
+            "type": "shell",
+            "command": "${workspaceFolder}/venv/Scripts/pip install -r requirements.txt",
+            "windows": {
+                "command": ".\\venv\\Scripts\\pip.exe install -r requirements.txt"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "3. Run Flask App",
+            "type": "shell",
+            "command": ".\\venv\\Scripts\\python.exe app.py",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+    ]
+}
