@@ -66,8 +66,3 @@ pip install flask
 
 ---
 
-## 👨‍💻 Developer
-
-**Rifat Bin Tayub**  
-Cyber Security Enthusiast | Python Learner | Exploring Ethical Hacking & Cyber Defense
-
