@@ -271,9 +271,12 @@ login_page = """
         <button type="submit">Login</button>
     </form>
 
-    <p class="error">{{ message }}</p>
-    <p>Demo Login: <b>admin</b> / <b>12345</b></p>
-    <a href="/">Back to Home</a>
+    {% if message %}
+        <p class="error">{{ message }}</p>
+    {% endif %}
+    <div style="margin-top:15px;">
+        <a href="/">← Back to Home</a>
+    </div>
 </div>
 </body>
 </html>
