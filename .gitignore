@@ -20,3 +20,8 @@ venv.bak/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Uploaded evidence files
+static/uploads/*
+!static/uploads/.gitkeep
+

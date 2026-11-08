@@ -1,9 +1,20 @@
 from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 import sqlite3
 from datetime import datetime
+import os
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = "cyber_security_secret_key"
+
+UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "pdf"}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB max limit
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "12345"
@@ -22,12 +33,24 @@ def create_database():
             threat_level TEXT NOT NULL,
             description TEXT NOT NULL,
             status TEXT NOT NULL,
-            report_time TEXT NOT NULL
+            report_time TEXT NOT NULL,
+            threat_url TEXT DEFAULT '',
+            evidence_file TEXT DEFAULT ''
         )
     """)
 
+    # Migrate columns if upgrading an existing database
+    cursor.execute("PRAGMA table_info(reports)")
+    existing_cols = [col[1] for col in cursor.fetchall()]
+    if "threat_url" not in existing_cols:
+        cursor.execute("ALTER TABLE reports ADD COLUMN threat_url TEXT DEFAULT ''")
+    if "evidence_file" not in existing_cols:
+        cursor.execute("ALTER TABLE reports ADD COLUMN evidence_file TEXT DEFAULT ''")
+
     conn.commit()
     conn.close()
+
+create_database()
 
 
 # ================= Home Page =================
@@ -83,7 +106,7 @@ home_page = """
     <div class="box">
         <h2>Submit Cyber Threat Report</h2>
 
-        <form method="POST" action="/submit">
+        <form method="POST" action="/submit" enctype="multipart/form-data">
             <label>Reporter Name</label>
             <input type="text" name="reporter_name" placeholder="Enter your name" required>
 
@@ -107,6 +130,12 @@ home_page = """
                 <option value="Medium">Medium</option>
                 <option value="High">High</option>
             </select>
+
+            <label>Threat / Suspicious Link (Optional)</label>
+            <input type="text" name="threat_url" placeholder="e.g. http://fake-login-bank.xyz">
+
+            <label>Evidence Screenshot / File (Optional)</label>
+            <input type="file" name="evidence_file" accept="image/*,.pdf" style="background:#334155; padding:10px;">
 
             <label>Description</label>
             <textarea name="description" minlength="10" placeholder="Write at least 10 characters about the threat..." required></textarea>
@@ -172,11 +201,45 @@ dashboard_page = """
         td { border:1px solid #475569; padding:8px; text-align:center; }
         input, select { padding:10px; border-radius:6px; border:none; margin:5px; background:#334155; color:white; }
         button, .btn {
-            background:#2563eb; color:white; padding:8px 14px;
+            display: inline-block;
+            background:#2563eb; color:white; padding:6px 12px;
             border:none; border-radius:6px; text-decoration:none; cursor:pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .action-btns {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
         }
         .danger { background:#dc2626; }
+        .danger:hover { background:#b91c1c; }
         .resolve { background:#16a34a; }
+        .resolve:hover { background:#15803d; }
+        .url-badge {
+            display: inline-block;
+            background: #0284c7;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .url-badge:hover { background: #0369a1; }
+        .file-badge {
+            display: inline-block;
+            background: #7c3aed;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .file-badge:hover { background: #6d28d9; }
         .low { color:#22c55e; font-weight:bold; }
         .medium { color:#facc15; font-weight:bold; }
         .high { color:#ef4444; font-weight:bold; }
@@ -206,7 +269,7 @@ dashboard_page = """
         <h2>Search and Filter Reports</h2>
 
         <form method="GET" action="/dashboard">
-            <input type="text" name="search" placeholder="Search name/email/type" value="{{ search }}">
+            <input type="text" name="search" placeholder="Search name/email/type/url" value="{{ search }}">
             <select name="level">
                 <option value="">All Threat Levels</option>
                 <option value="Low" {% if level=="Low" %}selected{% endif %}>Low</option>
@@ -235,6 +298,7 @@ dashboard_page = """
                 <th>Email</th>
                 <th>Threat Type</th>
                 <th>Level</th>
+                <th>Evidence / Link</th>
                 <th>Description</th>
                 <th>Status</th>
                 <th>Time</th>
@@ -256,6 +320,20 @@ dashboard_page = """
                     <td class="high">{{ r[4] }}</td>
                 {% endif %}
 
+                <td>
+                    <div style="display:flex; flex-direction:column; gap:5px; align-items:center;">
+                        {% if r[8] %}
+                            <a href="{{ r[8] if r[8].startswith('http://') or r[8].startswith('https://') else 'http://' + r[8] }}" target="_blank" rel="noopener noreferrer" class="url-badge" title="{{ r[8] }}">🔗 Visit Link</a>
+                        {% endif %}
+                        {% if r[9] %}
+                            <a href="/static/uploads/{{ r[9] }}" target="_blank" class="file-badge" title="View Evidence">🖼️ View Evidence</a>
+                        {% endif %}
+                        {% if not r[8] and not r[9] %}
+                            <span style="color:#64748b; font-size:12px;">None</span>
+                        {% endif %}
+                    </div>
+                </td>
+
                 <td>{{ r[5] }}</td>
 
                 {% if r[6] == "Resolved" %}
@@ -266,8 +344,10 @@ dashboard_page = """
 
                 <td>{{ r[7] }}</td>
                 <td>
-                    <a class="btn resolve" href="/resolve/{{ r[0] }}">Resolve</a>
-                    <a class="btn danger" href="/delete/{{ r[0] }}" onclick="return confirm('Are you sure you want to delete this report?');">Delete</a>
+                    <div class="action-btns">
+                        <a class="btn resolve" href="/resolve/{{ r[0] }}">Resolve</a>
+                        <a class="btn danger" href="/delete/{{ r[0] }}" onclick="return confirm('Are you sure you want to delete this report?');">Delete</a>
+                    </div>
                 </td>
             </tr>
             {% endfor %}
@@ -296,11 +376,21 @@ def submit_report():
     email = request.form["email"].strip()
     threat_type = request.form["threat_type"].strip()
     threat_level = request.form["threat_level"].strip()
+    threat_url = request.form.get("threat_url", "").strip()
     description = request.form["description"].strip()
 
     if len(description) < 10:
         flash("Description must be at least 10 characters.", "error")
         return redirect(url_for("home"))
+
+    evidence_filename = ""
+    if "evidence_file" in request.files:
+        file = request.files["evidence_file"]
+        if file and file.filename != "" and allowed_file(file.filename):
+            clean_name = secure_filename(file.filename)
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            evidence_filename = f"{timestamp}_{clean_name}"
+            file.save(os.path.join(app.config["UPLOAD_FOLDER"], evidence_filename))
 
     status = "Pending"
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -310,9 +400,9 @@ def submit_report():
 
     cursor.execute("""
         INSERT INTO reports
-        (reporter_name, email, threat_type, threat_level, description, status, report_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (reporter_name, email, threat_type, threat_level, description, status, report_time))
+        (reporter_name, email, threat_type, threat_level, description, status, report_time, threat_url, evidence_file)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (reporter_name, email, threat_type, threat_level, description, status, report_time, threat_url, evidence_filename))
 
     conn.commit()
     conn.close()
@@ -351,12 +441,12 @@ def dashboard():
     conn = sqlite3.connect("cyber_reports.db")
     cursor = conn.cursor()
 
-    query = "SELECT * FROM reports WHERE 1=1"
+    query = "SELECT id, reporter_name, email, threat_type, threat_level, description, status, report_time, threat_url, evidence_file FROM reports WHERE 1=1"
     values = []
 
     if search:
-        query += " AND (reporter_name LIKE ? OR email LIKE ? OR threat_type LIKE ? OR description LIKE ?)"
-        values.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
+        query += " AND (reporter_name LIKE ? OR email LIKE ? OR threat_type LIKE ? OR description LIKE ? OR threat_url LIKE ?)"
+        values.extend([f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%", f"%{search}%"])
 
     if level:
         query += " AND threat_level = ?"
