@@ -84,6 +84,7 @@ home_page = """
 <div class="container">
 
     <div class="nav">
+        <a class="btn" href="/track" style="background:#0284c7; margin-right:8px;">🔍 Track Report</a>
         <a class="btn" href="/login">Admin Login</a>
     </div>
 
@@ -143,6 +144,100 @@ home_page = """
             <button type="submit">Submit Report</button>
         </form>
     </div>
+
+</div>
+</body>
+</html>
+"""
+
+
+# ================= Track Page =================
+track_page = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Track Threat Report Status</title>
+    <style>
+        body { margin:0; font-family:Arial; background:#0f172a; color:white; }
+        .container { width:80%; max-width:900px; margin:auto; padding:30px; }
+        .box { background:#1e293b; padding:25px; border-radius:12px; margin-bottom:25px; box-shadow:0 5px 20px #000; }
+        h1, h2 { color:#38bdf8; }
+        input {
+            width:70%; padding:12px; margin:8px 0 15px;
+            border-radius:8px; border:none; background:#334155; color:white; font-size:15px;
+        }
+        button, .btn {
+            background:#2563eb; color:white; padding:12px 20px;
+            border:none; border-radius:8px; cursor:pointer; text-decoration:none; font-size:15px;
+        }
+        button:hover, .btn:hover { background:#1d4ed8; }
+        .nav { text-align:right; margin-bottom:15px; }
+        .report-card {
+            background:#0f172a; border:1px solid #334155; border-radius:10px; padding:20px; margin-top:15px;
+        }
+        .badge {
+            display:inline-block; padding:6px 14px; border-radius:6px; font-weight:bold; font-size:13px;
+        }
+        .badge-pending { background:#854d0e; color:#fef08a; }
+        .badge-resolved { background:#166534; color:#bbf7d0; }
+        .meta { color:#94a3b8; font-size:13px; margin:8px 0; }
+        .info { color:#cbd5e1; line-height:1.6; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="nav">
+        <a class="btn" href="/">🏠 Home</a>
+        <a class="btn" href="/login">Admin Login</a>
+    </div>
+
+    <div class="box">
+        <h1>🔍 Track Threat Report Status</h1>
+        <p class="info">
+            Enter your <b>Email Address</b> or <b>Report ID</b> to check if your submitted cyber threat report has been reviewed and resolved by our security response team.
+        </p>
+
+        <form method="GET" action="/track" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input type="text" name="query" placeholder="Enter Email Address (e.g. user@gmail.com) or Report ID (e.g. 1)" value="{{ query }}" required style="flex:1;">
+            <button type="submit">Check Status</button>
+        </form>
+    </div>
+
+    {% if query %}
+        <div class="box">
+            <h2>Tracking Results for "{{ query }}"</h2>
+
+            {% if reports|length == 0 %}
+                <p style="color:#f87171;">⚠️ No report found matching this Email or Report ID. Please check the information and try again.</p>
+            {% else %}
+                {% for r in reports %}
+                <div class="report-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <h3 style="margin:0; color:#38bdf8;">Report #{{ r[0] }} - {{ r[3] }}</h3>
+                        {% if r[6] == "Resolved" %}
+                            <span class="badge badge-resolved">✅ Resolved - Threat Mitigated</span>
+                        {% else %}
+                            <span class="badge badge-pending">⏳ Pending - Under Security Investigation</span>
+                        {% endif %}
+                    </div>
+                    <div class="meta">
+                        <span><b>Reporter:</b> {{ r[1] }}</span> |
+                        <span><b>Email:</b> {{ r[2] }}</span> |
+                        <span><b>Threat Level:</b> {{ r[4] }}</span> |
+                        <span><b>Reported At:</b> {{ r[7] }}</span>
+                    </div>
+                    {% if r[8] %}
+                        <div class="meta"><b>Reported Link:</b> <span style="color:#38bdf8;">{{ r[8] }}</span></div>
+                    {% endif %}
+                    <p style="margin:10px 0 0; color:#e2e8f0; font-size:14px; background:#1e293b; padding:12px; border-radius:6px; line-height:1.5;">
+                        <b>Description:</b> {{ r[5] }}
+                    </p>
+                </div>
+                {% endfor %}
+            {% endif %}
+        </div>
+    {% endif %}
 
 </div>
 </body>
@@ -404,11 +499,39 @@ def submit_report():
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (reporter_name, email, threat_type, threat_level, description, status, report_time, threat_url, evidence_filename))
 
+    report_id = cursor.lastrowid
     conn.commit()
     conn.close()
 
-    flash("Report submitted successfully!", "success")
+    flash(f"Report submitted successfully! Your Tracking ID is #{report_id}. You can track status anytime using 'Track Report'.", "success")
     return redirect(url_for("home"))
+
+
+@app.route("/track")
+def track():
+    query = request.args.get("query", "").strip()
+    reports = []
+
+    if query:
+        conn = sqlite3.connect("cyber_reports.db")
+        cursor = conn.cursor()
+
+        if query.isdigit() or (query.startswith("#") and query[1:].isdigit()):
+            clean_id = int(query.replace("#", ""))
+            cursor.execute("""
+                SELECT id, reporter_name, email, threat_type, threat_level, description, status, report_time, threat_url, evidence_file
+                FROM reports WHERE id = ?
+            """, (clean_id,))
+        else:
+            cursor.execute("""
+                SELECT id, reporter_name, email, threat_type, threat_level, description, status, report_time, threat_url, evidence_file
+                FROM reports WHERE email LIKE ? OR threat_url LIKE ? ORDER BY id DESC
+            """, (f"%{query}%", f"%{query}%"))
+
+        reports = cursor.fetchall()
+        conn.close()
+
+    return render_template_string(track_page, query=query, reports=reports)
 
 
 @app.route("/login", methods=["GET", "POST"])
